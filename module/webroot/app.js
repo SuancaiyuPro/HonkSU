@@ -25,6 +25,8 @@
     $('stop').disabled = busy || !bridge.available || state.running !== '1';
     $('restart').disabled = busy || !bridge.available || state.core_present !== '1';
     $('refresh').disabled = busy;
+    $('run-probe').disabled = busy || !bridge.available || state.core_present !== '1' || state.probe_available !== '1';
+    $('view-probe').disabled = busy || !bridge.available;
     for (const button of document.querySelectorAll('.remove')) button.disabled = busy || !bridge.available;
   }
   function render(settings = false) {
@@ -41,6 +43,10 @@
     $('core-build').textContent = state.core_ebpf_compiled === '1' ? 'Clash API · VLESS / VMess · eBPF 已编译' : 'Clash API · VLESS / VMess';
     $('core-revision').textContent = state.core_commit ? state.core_commit.slice(0, 12) : '—';
     $('hot-install-status').textContent = ({ complete: '已完成', pending: '未完成，请查看安装日志', failed: '恢复失败，请查看安装日志', none: '尚无记录' })[state.hot_install] || '尚无记录';
+    const result = data.probeResult(state);
+    $('probe-state').textContent = result.label;
+    $('probe-detail').textContent = result.detail;
+    $('probe-time').textContent = /^\d+$/.test(state.probe_time || '') ? `记录时间：${new Date(Number(state.probe_time) * 1000).toLocaleString()}` : '验证由你手动运行，不会在开机时自动执行';
     $('old-core').hidden = !running || state.running_core_current !== '0';
     $('dirty').hidden = state.pending_restart !== '1';
     if (settings) {
@@ -86,6 +92,10 @@
     buttons();
   }
   async function logs() { $('log-output').textContent = (await bridge.command('logs')).trim() || '尚无日志'; }
+  async function probeLogs() {
+    $('probe-output').hidden = false;
+    $('probe-output').textContent = (await bridge.command('probe-log')).trim() || '尚无验证记录';
+  }
   async function perform(action) {
     if (busy) return;
     busy = true; buttons();
@@ -124,6 +134,15 @@
   $('refresh').addEventListener('click', () => perform(async () => { if (!bridge.available) throw new Error('请从 KernelSU 模块 WebUI 打开'); await refresh(true); await providers(); toast('状态已刷新'); }));
   $('refresh-log').addEventListener('click', () => perform(logs));
   $('clear-log').addEventListener('click', () => perform(async () => { await bridge.command('clear-log'); await logs(); toast('日志已清空'); }));
+  $('view-probe').addEventListener('click', () => perform(probeLogs));
+  $('run-probe').addEventListener('click', () => perform(async () => {
+    state.probe_state = 'running'; render();
+    $('probe-output').hidden = false;
+    $('probe-output').textContent = '正在隔离网络中验证，最长约 45 秒。完成后会显示结果。';
+    try { await bridge.command('probe'); }
+    finally { await refresh(); await probeLogs(); }
+    toast('隔离验证通过，手机流量接管仍未启用');
+  }));
   if (bridge.available) {
     perform(async () => { await refresh(true); await providers(); });
     const poll = setInterval(() => {

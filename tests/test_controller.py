@@ -38,7 +38,63 @@ class ControllerTests(unittest.TestCase):
         shutil.copy2(self.fixture, self.module / "bin/honk-core")
         digest = hashlib.sha256(self.fixture.read_bytes()).hexdigest()
         (self.module / "bin/SHA256SUMS").write_text(f"{digest}  honk-core\n")
-        self.env = dict(os.environ, HONKSU_TEST_MODE="1", HONKSU_TEST_DATA=str(self.data), HONKSU_TEST_PROC_ROOT=str(self.proc), HONKSU_TEST_HOT_TRASH_ROOT=str(self.trash))
+        self.env = dict(os.environ, HONKSU_TEST_MODE="1", HONKSU_TEST_DATA=str(self.data), HONKSU_TEST_PROC_ROOT=str(self.proc), HONKSU_TEST_HOT_TRASH_ROOT=str(self.trash), HONKSU_TEST_SELINUX="Enforcing")
+
+    def enable_probe(self):
+        digest = hashlib.sha256(self.fixture.read_bytes()).hexdigest()
+        (self.module / "core.prop").write_text(f"core_socket_identity_probe=1\ncore_sha256={digest}\n")
+
+    def test_probe_records_success_without_starting_or_changing_settings(self):
+        self.enable_probe()
+        self.add()
+        secret = (self.data / "settings/api_secret").read_bytes()
+        self.run_ctl("probe")
+        state = self.status()
+        self.assertEqual(state["probe_state"], "passed")
+        self.assertEqual(state["probe_exit"], "0")
+        self.assertEqual(state["running"], "0")
+        self.assertEqual(state["autostart"], "0")
+        self.assertEqual(state["providers"], "1")
+        self.assertEqual((self.data / "settings/api_secret").read_bytes(), secret)
+        self.assertIn("private-socket-identity: OK", self.run_ctl("probe-log").stdout)
+
+    def test_probe_failure_and_incomplete_output_cannot_report_passed(self):
+        self.enable_probe()
+        for mode in ["fail", "incomplete"]:
+            self.env["HONKSU_TEST_PROBE"] = mode
+            self.assertNotEqual(self.run_ctl("probe", check=False).returncode, 0)
+            self.assertEqual(self.status()["probe_state"], "failed")
+
+    def test_probe_timeout_is_bounded_and_releases_lock(self):
+        self.enable_probe()
+        self.env.update(HONKSU_TEST_PROBE="slow", HONKSU_TEST_PROBE_TIMEOUT="1")
+        self.assertNotEqual(self.run_ctl("probe", check=False).returncode, 0)
+        state = self.status()
+        self.assertEqual(state["probe_state"], "failed")
+        self.assertNotEqual(state["probe_exit"], "0")
+
+    def test_probe_result_expires_on_core_or_boot_change(self):
+        self.enable_probe()
+        self.run_ctl("probe")
+        self.env["HONKSU_TEST_BOOT_ID"] = "different-boot"
+        self.assertEqual(self.status()["probe_state"], "stale")
+        self.env.pop("HONKSU_TEST_BOOT_ID")
+        (self.module / "core.prop").write_text("core_socket_identity_probe=1\ncore_sha256=changed\n")
+        self.assertEqual(self.status()["probe_state"], "stale")
+
+    def test_probe_rejects_unsupported_or_modified_core_and_permissive(self):
+        self.assertNotEqual(self.run_ctl("probe", check=False).returncode, 0)
+        self.enable_probe()
+        self.env["HONKSU_TEST_SELINUX"] = "Permissive"
+        self.assertNotEqual(self.run_ctl("probe", check=False).returncode, 0)
+        self.env["HONKSU_TEST_SELINUX"] = "Enforcing"
+        (self.module / "core.prop").write_text("core_socket_identity_probe=1\ncore_sha256=wrong\n")
+        self.assertNotEqual(self.run_ctl("probe", check=False).returncode, 0)
+
+    def test_probe_rejects_extra_arguments_before_execution(self):
+        self.enable_probe()
+        self.assertNotEqual(self.run_ctl("probe", "--mark", "0", check=False).returncode, 0)
+        self.assertFalse((self.data / "logs/probe.log").exists())
 
     def tearDown(self):
         self.run_ctl("stop", check=False)
@@ -255,6 +311,17 @@ class ControllerTests(unittest.TestCase):
             stdout, stderr = process.communicate(timeout=20)
         self.assertEqual(process.returncode, 0, stderr)
         self.assertIn("Hot installation complete", stdout)
+
+    def test_hot_install_does_not_require_flock_wait_option(self):
+        helpers = self.root / "helpers"
+        helpers.mkdir()
+        flock = helpers / "flock"
+        native = shutil.which("flock")
+        flock.write_text(f'#!/bin/sh\n[ "$1" != -w ] || exit 2\nexec "{native}" "$@"\n')
+        flock.chmod(0o755)
+        self.env["PATH"] = str(helpers) + os.pathsep + self.env["PATH"]
+        self.run_ctl("hot-install")
+        self.assertEqual(self.status()["hot_install"], "complete")
 
     def run_installer(self, supported):
         script = '''

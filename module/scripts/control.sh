@@ -42,7 +42,12 @@ init_settings() {
 lock() {
   exec 9>"$DATA/run/controller.lock"
   if [ "$command" = hot-install ]; then
-    flock -w 10 9 || fail "Another operation is still in progress; hot activation did not run."
+    attempts=0
+    while ! flock -n 9; do
+      attempts=$((attempts+1))
+      [ "$attempts" -lt 10 ] || fail "Another operation is still in progress; hot activation did not run."
+      sleep 1
+    done
   else
     flock -n 9 || fail "Another operation is in progress."
   fi
@@ -91,6 +96,65 @@ provider_count() {
   for f in "$DATA/providers"/p*.url; do [ ! -f "$f" ] || count=$((count+1)); done
   printf '%s' "$count"
 }
+meta_value() { sed -n "s/^$1=//p" "$MODDIR/core.prop" 2>/dev/null | head -n 1; }
+probe_value() { sed -n "s/^$1=//p" "$DATA/run/probe.status" 2>/dev/null | head -n 1; }
+boot_id() {
+  if [ "${HONKSU_TEST_MODE:-0}" = 1 ]; then printf '%s' "${HONKSU_TEST_BOOT_ID:-fixture-boot}";
+  else cat /proc/sys/kernel/random/boot_id; fi
+}
+write_probe_state() {
+  {
+    printf 'state=%s\nexit=%s\ncore_sha256=%s\nboot_id=%s\ntime=%s\n' \
+      "$1" "$2" "$probe_digest" "$(boot_id)" "$(date +%s)"
+  } > "$DATA/run/.probe-status.$$"
+  mv -f "$DATA/run/.probe-status.$$" "$DATA/run/probe.status"
+}
+probe_status() {
+  probe_available=0
+  [ "$(meta_value core_socket_identity_probe)" != 1 ] || probe_available=1
+  probe_state=$(probe_value state)
+  case "$probe_state" in not_run|running|passed|failed) ;; *) probe_state=not_run;; esac
+  if [ "$probe_state" != not_run ]; then
+    if [ "$(probe_value core_sha256)" != "$(meta_value core_sha256)" ] || \
+       [ "$(probe_value boot_id)" != "$(boot_id)" ]; then probe_state=stale; fi
+    # A live operation owns controller.lock; a visible running record is interrupted.
+    [ "$probe_state" != running ] || probe_state=interrupted
+  fi
+  printf 'probe_available=%s\nprobe_state=%s\nprobe_exit=%s\nprobe_time=%s\n' \
+    "$probe_available" "$probe_state" "$(probe_value exit)" "$(probe_value time)"
+}
+run_probe() {
+  [ "$(meta_value core_socket_identity_probe)" = 1 ] || fail "This core does not support the socket identity probe."
+  check_core
+  probe_digest=$(sha256sum "$CORE" | awk '{print $1}')
+  [ "$probe_digest" = "$(meta_value core_sha256)" ] || fail "Core checksum mismatch; reinstall the built module."
+  enforcing=$(getenforce 2>/dev/null || true)
+  if [ "${HONKSU_TEST_MODE:-0}" = 1 ]; then enforcing=${HONKSU_TEST_SELINUX:-$enforcing}; fi
+  [ "$enforcing" = Enforcing ] || fail "Keep SELinux Enforcing before running the probe."
+  timeout 3 "$CORE" android-ebpf-probe --help | grep -q -- --socket-identity || fail "Core probe command is unavailable."
+  probe_tmp="$DATA/logs/.probe.$$"
+  printf 'Validation running; final output is published on completion.\n' > "$probe_tmp"
+  mv -f "$probe_tmp" "$DATA/logs/probe.log"
+  write_probe_state running ''
+  trap 'write_probe_state failed 130; [ ! -f "$probe_tmp" ] || mv -f "$probe_tmp" "$DATA/logs/probe.log"' EXIT
+  trap 'exit 143' TERM
+  trap 'exit 130' INT HUP
+  probe_timeout=45
+  if [ "${HONKSU_TEST_MODE:-0}" = 1 ]; then probe_timeout=${HONKSU_TEST_PROBE_TIMEOUT:-45}; fi
+  if timeout "$probe_timeout" "$CORE" android-ebpf-probe --socket-identity > "$probe_tmp" 2>&1 9>&-; then
+    probe_exit=0
+  else probe_exit=$?; fi
+  probe_state=failed
+  if [ "$probe_exit" = 0 ] && grep -q '^private-socket-identity: OK ' "$probe_tmp" && grep -q '^probe: OK ' "$probe_tmp"; then
+    probe_state=passed
+  elif [ "$probe_exit" = 0 ]; then probe_exit=1; fi
+  printf '\nmodule_probe_exit=%s\n' "$probe_exit" >> "$probe_tmp"
+  mv -f "$probe_tmp" "$DATA/logs/probe.log"
+  write_probe_state "$probe_state" "$probe_exit"
+  trap - EXIT TERM INT HUP
+  [ "$probe_state" = passed ] || fail "Isolated validation failed; open the diagnostic result for details."
+  printf 'Private socket identity validation passed; phone traffic interception remains disabled.\n'
+}
 generate() {
   tmp="$DATA/config/.config.$$"
   {
@@ -133,6 +197,7 @@ status() {
   fi
   printf 'pending_restart=%s\n' "$dirty"
   if [ -f "$MODDIR/core.prop" ]; then cat "$MODDIR/core.prop"; fi
+  probe_status
 }
 check_core() {
   [ -x "$CORE" ] || fail "Missing executable honk-core. Reinstall the built module ZIP."
@@ -231,6 +296,10 @@ lock
 init_settings
 case "$command" in
   status) [ "$#" = 0 ] || fail "Unexpected arguments."; status;;
+  probe) [ "$#" = 0 ] || fail "Unexpected arguments."; run_probe;;
+  probe-log)
+    [ "$#" = 0 ] || fail "Unexpected arguments."
+    if [ -f "$DATA/logs/probe.log" ]; then tail -n 240 "$DATA/logs/probe.log"; fi;;
   providers) list_providers;;
   add) add_provider "$@";;
   remove)

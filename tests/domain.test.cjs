@@ -62,3 +62,22 @@ test('browser preview cannot pretend to execute root commands', async () => {
   assert.equal(window.HonkSUBridge.available, false);
   await assert.rejects(window.HonkSUBridge.command('start'), /KernelSU/);
 });
+
+test('diagnostics distinguish a recorded proof from traffic interception and expired results', () => {
+  assert.match(data.probeResult({ probe_available: '1', probe_state: 'passed' }).detail, /完整透明接管仍待适配/);
+  assert.match(data.probeResult({ probe_available: '1', probe_state: 'failed' }).label, /失败/);
+  assert.match(data.probeResult({ probe_available: '1', probe_state: 'stale' }).label, /重新验证/);
+  assert.match(data.probeResult({ probe_available: '0', probe_state: 'passed' }).label, /不支持/);
+});
+
+test('probe bridge allows the bounded native test to complete before its UI timeout', async () => {
+  const vm = require('node:vm');
+  const fs = require('node:fs');
+  let budget;
+  const window = { HonkSUData: data, ksu: { exec(command, options, callback) { window[callback](0, 'passed', ''); } } };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../module/webroot/bridge.js'), 'utf8'), { window, setTimeout(callback, delay) { budget = delay; return 1; }, clearTimeout() {} });
+  await window.HonkSUBridge.command('probe');
+  assert.equal(budget, 65000);
+  await window.HonkSUBridge.command('status');
+  assert.equal(budget, 30000);
+});
