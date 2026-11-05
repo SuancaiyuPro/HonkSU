@@ -38,6 +38,10 @@
     $('core-pid').textContent = running ? state.pid : '—';
     $('inbound-summary').textContent = state.port ? `:${state.port} · 不接管流量` : '—';
     $('api-summary').textContent = state.api_port ? `127.0.0.1:${state.api_port}` : '—';
+    $('core-build').textContent = state.core_ebpf_compiled === '1' ? 'Clash API · VLESS / VMess · eBPF 已编译' : 'Clash API · VLESS / VMess';
+    $('core-revision').textContent = state.core_commit ? state.core_commit.slice(0, 12) : '—';
+    $('hot-install-status').textContent = ({ complete: '已完成', pending: '未完成，请查看安装日志', failed: '恢复失败，请查看安装日志', none: '尚无记录' })[state.hot_install] || '尚无记录';
+    $('old-core').hidden = !running || state.running_core_current !== '0';
     $('dirty').hidden = state.pending_restart !== '1';
     if (settings) {
       $('port').value = state.port || '12346';

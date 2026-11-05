@@ -19,13 +19,23 @@ def write_zip(source, target):
                 archive.write(path, path.relative_to(source).as_posix())
 
 
-def build(core, output):
+def build(core, output, ebpf_object=None):
     metadata = json.loads((ROOT / "core.lock.json").read_text())
     binary = core.read_bytes()
-    if binary[:6] != b"\x7fELF\x02\x01" or struct.unpack_from("<H", binary, 18)[0] != 183:
+    if len(binary) < 64 or binary[:6] != b"\x7fELF\x02\x01" or struct.unpack_from("<H", binary, 18)[0] != 183:
         raise ValueError("The supplied core must be an ARM64 little-endian ELF executable")
     if b"/system/bin/linker64\x00" not in binary:
         raise ValueError("The supplied core must use the Android linker")
+    object_digest = ""
+    if metadata["ebpf"]:
+        if ebpf_object is None:
+            raise ValueError("The eBPF-enabled build requires its matching kernel object")
+        kernel_object = ebpf_object.read_bytes()
+        if len(kernel_object) < 64 or kernel_object[:6] != b"\x7fELF\x02\x01" or struct.unpack_from("<H", kernel_object, 18)[0] != 247 or b".BTF\x00" not in kernel_object:
+            raise ValueError("The kernel object must be a BTF-bearing little-endian BPF ELF")
+        if kernel_object not in binary:
+            raise ValueError("The supplied core does not embed the matching eBPF object")
+        object_digest = hashlib.sha256(kernel_object).hexdigest()
     digest = hashlib.sha256(binary).hexdigest()
     properties = dict(line.split("=", 1) for line in (ROOT / "module/module.prop").read_text().splitlines() if "=" in line)
     version = properties["version"]
@@ -38,7 +48,13 @@ def build(core, output):
         shutil.copy2(core, stage / "bin/honk-core")
         (stage / "bin/honk-core").chmod(0o755)
         (stage / "bin/SHA256SUMS").write_text(f"{digest}  honk-core\n")
-        (stage / "core.prop").write_text(f"core_commit={metadata['commit']}\ncore_target={metadata['target']}\ncore_api={metadata['api']}\ncore_sha256={digest}\n")
+        (stage / "core.prop").write_text(
+            f"core_repository={metadata['repository']}\ncore_commit={metadata['commit']}\n"
+            f"core_target={metadata['target']}\ncore_api={metadata['api']}\ncore_sha256={digest}\n"
+            f"core_features={','.join(metadata['features'])}\ncore_ebpf_compiled={int(metadata['ebpf'])}\n"
+            f"core_android_interception={int(metadata['android_interception'])}\ncore_ebpf_sha256={object_digest}\n"
+            f"module_version={version}\n"
+        )
         shutil.copy2(ROOT / "LICENSE", stage / "LICENSE")
         shutil.copy2(ROOT / "CORE_SOURCE.md", stage / "CORE_SOURCE.md")
         write_zip(stage, destination)
@@ -60,5 +76,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--core", type=Path, required=True)
     parser.add_argument("--out", type=Path, default=ROOT / "dist")
+    parser.add_argument("--ebpf-object", type=Path)
     options = parser.parse_args()
-    build(options.core.resolve(), options.out.resolve())
+    build(options.core.resolve(), options.out.resolve(), options.ebpf_object.resolve() if options.ebpf_object else None)

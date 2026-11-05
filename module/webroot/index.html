@@ -32,9 +32,12 @@
           <div><dt>进程 PID</dt><dd id="core-pid">—</dd></div>
           <div><dt>TCP / UDP 测试监听</dt><dd id="inbound-summary">—</dd></div>
           <div><dt>Clash API</dt><dd id="api-summary">—</dd></div>
-          <div><dt>核心能力</dt><dd>Clash API · VLESS / VMess</dd></div>
-          <div><dt>版本</dt><dd>0.1.0-alpha.1</dd></div>
+          <div><dt>已安装核心能力</dt><dd id="core-build">正在读取</dd></div>
+          <div><dt>已安装核心版本</dt><dd id="core-revision">—</dd></div>
+          <div><dt>热安装</dt><dd id="hot-install-status">—</dd></div>
+          <div><dt>模块版本</dt><dd>0.1.0-alpha.2</dd></div>
         </dl>
+        <div id="old-core" class="notice amber" hidden>旧核心仍在运行。热安装恢复可能未完成，请检查安装日志后重启核心。</div>
       </section>
       <section class="page" id="subscriptions" aria-labelledby="subscriptions-title" hidden>
         <div class="section-heading"><div><p class="eyebrow">PROVIDERS</p><h2 id="subscriptions-title">订阅</h2></div><span id="subscription-total" class="chip">0 / 32</span></div>
@@ -50,7 +53,7 @@
       <section class="page" id="inbound" aria-labelledby="inbound-title" hidden>
         <div class="section-heading"><div><p class="eyebrow">INBOUND</p><h2 id="inbound-title">入站</h2></div></div>
         <form id="settings-form" class="form">
-          <fieldset><legend>运行方式</legend><label class="choice"><input type="radio" name="mode" value="test" checked><span><strong>核心测试</strong><small>启动真实 honk 进程，不接管手机流量</small></span></label><label class="choice disabled"><input type="radio" name="mode" value="ebpf" disabled><span><strong>eBPF 透明入站</strong><small>待核心 Android eBPF 后端适配</small></span><span class="chip">待适配</span></label></fieldset>
+          <fieldset><legend>运行方式</legend><label class="choice"><input type="radio" name="mode" value="test" checked><span><strong>核心测试</strong><small>启动真实 honk 进程，不接管手机流量</small></span></label><label class="choice disabled"><input type="radio" name="mode" value="ebpf" disabled><span><strong>eBPF 透明入站</strong><small>后端已编译，Android 转发链路待适配</small></span><span class="chip">待适配</span></label></fieldset>
           <label>TCP / UDP 测试监听端口<input id="port" type="number" min="1024" max="65535" value="12346" required></label>
           <label>Clash API 端口<input id="api-port" type="number" min="1024" max="65535" value="9091" required><small>固定绑定 127.0.0.1，认证令牌由模块自动生成</small></label>
           <label>节点解析 DNS<input id="bootstrap" value="223.5.5.5:53" placeholder="223.5.5.5:53" required><small>首版支持 IPv4 地址和端口</small></label>

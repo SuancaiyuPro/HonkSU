@@ -4,11 +4,14 @@ umask 077
 MODDIR=$(CDPATH= cd "${0%/*}/.." && pwd)
 DATA=/data/adb/honksu
 PROC_ROOT=/proc
+HOT_TRASH_ROOT=/data/adb/ksu/hot_install_trash
 if [ "${HONKSU_TEST_MODE:-0}" = 1 ]; then
   DATA=${HONKSU_TEST_DATA:?test data directory required}
   PROC_ROOT=${HONKSU_TEST_PROC_ROOT:-/proc}
+  HOT_TRASH_ROOT=${HONKSU_TEST_HOT_TRASH_ROOT:-$DATA/hot-install-trash}
 fi
 CORE=$MODDIR/bin/honk-core
+CORE_CHECKED=0
 
 fail() { printf '%s\n' "$*" >&2; exit 1; }
 b64() { base64 | tr -d '\n'; }
@@ -38,7 +41,11 @@ init_settings() {
 }
 lock() {
   exec 9>"$DATA/run/controller.lock"
-  flock -n 9 || fail "Another operation is in progress."
+  if [ "$command" = hot-install ]; then
+    flock -w 10 9 || fail "Another operation is still in progress; hot activation did not run."
+  else
+    flock -n 9 || fail "Another operation is in progress."
+  fi
 }
 valid_port() {
   case "$1" in ''|*[!0-9]*|??????*) return 1;; esac
@@ -66,7 +73,16 @@ owned_pid() {
   current=$(ticks "$pid") || return 1
   [ -n "$current" ] && [ "$current" = "$expected" ] || return 1
   executable=$(readlink "$PROC_ROOT/$pid/exe" 2>/dev/null) || return 1
-  [ "$executable" = "$CORE" ] || [ "$executable" = "$CORE (deleted)" ] || return 1
+  executable=${executable% (deleted)}
+  if [ "$executable" != "$CORE" ]; then
+    case "$executable" in
+      "$HOT_TRASH_ROOT"/honksu.*/bin/honk-core)
+        archived=${executable#"$HOT_TRASH_ROOT"/honksu.}
+        archived=${archived%/bin/honk-core}
+        case "$archived" in ''|*[!0-9]*) return 1;; esac;;
+      *) return 1;;
+    esac
+  fi
   kill -0 "$pid" 2>/dev/null || return 1
   printf '%s\n' "$pid"
 }
@@ -103,6 +119,12 @@ status() {
   printf 'running=%s\npid=%s\nmode=%s\nport=%s\napi_port=%s\nbootstrap=%s\nautostart=%s\nproviders=%s\nebpf_available=0\n' \
     "$running" "$pid" "$(value mode)" "$(value port)" "$(value api_port)" "$(value bootstrap)" "$(value autostart)" "$(provider_count)"
   if [ -x "$CORE" ]; then printf 'core_present=1\n'; else printf 'core_present=0\n'; fi
+  current_core=0
+  if [ "$running" = 1 ]; then
+    image=$(readlink "$PROC_ROOT/$pid/exe" 2>/dev/null || true)
+    [ "$image" != "$CORE" ] || current_core=1
+  fi
+  printf 'running_core_current=%s\nhot_install=%s\n' "$current_core" "$(cat "$DATA/run/hotinstall.status" 2>/dev/null || printf none)"
   dirty=0
   if [ "$running" = 1 ]; then
     active=$(cat "$DATA/run/config.hash" 2>/dev/null || true)
@@ -112,11 +134,17 @@ status() {
   printf 'pending_restart=%s\n' "$dirty"
   if [ -f "$MODDIR/core.prop" ]; then cat "$MODDIR/core.prop"; fi
 }
-start() {
-  [ "$(value mode)" = test ] || fail "Android eBPF inbound is not available in this core."
+check_core() {
   [ -x "$CORE" ] || fail "Missing executable honk-core. Reinstall the built module ZIP."
+  if [ "${CORE_CHECKED:-0}" != 1 ]; then
+    timeout 3 "$CORE" --version >/dev/null 2>&1 || fail "The core cannot execute on this Android system."
+    CORE_CHECKED=1
+  fi
+}
+start() {
+  [ "$(value mode)" = test ] || fail "Android eBPF interception is not ready; only test mode is supported."
+  check_core
   if owned_pid >/dev/null; then printf 'Core process is already running.\n'; return; fi
-  "$CORE" --version >/dev/null 2>&1 || fail "The core cannot execute on this Android system."
   generate
   if [ -f "$DATA/logs/core.log" ] && [ "$(wc -c < "$DATA/logs/core.log")" -gt 2097152 ]; then
     mv -f "$DATA/logs/core.log" "$DATA/logs/core.previous.log"
@@ -148,6 +176,16 @@ stop() {
   fi
   rm -f "$DATA/run/core.pid" "$DATA/run/config.hash"
   printf 'Core process stopped.\n'
+}
+hot_install() {
+  check_core
+  resume_after_hot=0
+  if owned_pid >/dev/null; then resume_after_hot=1; fi
+  stop
+  if [ "$resume_after_hot" = 1 ]; then start; fi
+  printf 'complete\n' > "$DATA/run/hotinstall.status"
+  trap - EXIT
+  printf 'Hot installation complete. Previous running/stopped state and saved settings are preserved.\n'
 }
 add_provider() {
   [ "$#" = 2 ] || fail "A name and URL are required."
@@ -182,11 +220,15 @@ list_providers() {
   done
 }
 
-init
-lock
-init_settings
 command=${1:-status}
 shift || true
+init
+if [ "$command" = hot-install ]; then
+  printf 'pending\n' > "$DATA/run/hotinstall.status"
+  trap '[ "$?" -eq 0 ] || printf "failed\n" > "$DATA/run/hotinstall.status"' EXIT
+fi
+lock
+init_settings
 case "$command" in
   status) [ "$#" = 0 ] || fail "Unexpected arguments."; status;;
   providers) list_providers;;
@@ -207,7 +249,8 @@ case "$command" in
     generate; printf 'Settings saved; restart a running core to apply them.\n';;
   start) start;;
   stop) stop;;
-  restart) stop; start;;
+  restart) check_core; stop; start;;
+  hot-install) [ "$#" = 0 ] || fail "Unexpected arguments."; hot_install;;
   boot) [ "$(value autostart)" != 1 ] || start;;
   logs)
     if [ -f "$DATA/logs/core.log" ]; then tail -n 180 "$DATA/logs/core.log" | sed -E 's#https?://[^[:space:]]+#[subscription URL]#g'; fi;;

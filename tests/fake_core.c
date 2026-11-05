@@ -9,6 +9,7 @@ static void stop(int signal_number) { (void)signal_number; stopping = 1; }
 
 int main(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "--version") == 0) {
+        if (getenv("HONKSU_TEST_CORE_FAIL_VERSION")) return 4;
         puts("honk-core test fixture");
         return 0;
     }

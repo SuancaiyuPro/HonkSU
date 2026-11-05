@@ -42,6 +42,7 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('repository='+meta['repository']+'\n')
               output.write('commit='+meta['commit']+'\n')
+              output.write('features='+','.join(meta['features'])+'\n')
           PY
       - uses: actions/checkout@v4
         with:
@@ -52,7 +53,47 @@ jobs:
       - name: Install native build dependencies
         run: |
           sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout=30
-          sudo apt-get install -y cmake ninja-build pkg-config libclang-dev clang
+          sudo apt-get install -y cmake ninja-build pkg-config libclang-dev clang llvm zstd
+      - name: Install pinned Rust and eBPF toolchains
+        working-directory: .build/core
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add "$TARGET"
+          channel=$(python3 -c 'import tomllib; print(tomllib.load(open("crates/honk-ebpf/rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
+          rustup toolchain install "$channel" --profile minimal --component rust-src --component llvm-tools
+          echo "HONKSU_EBPF_TOOLCHAIN=$channel" >> "$GITHUB_ENV"
+      - name: Install pinned bpf-linker
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .build/core/.github/ci/pins.env
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/bpf-linker.tar.zst" \
+            "https://github.com/aya-rs/bpf-linker/releases/download/v$BPF_LINKER_VERSION/bpf-linker-x86_64-unknown-linux-musl.tar.zst"
+          echo "$BPF_LINKER_SHA256  $RUNNER_TEMP/bpf-linker.tar.zst" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/bpf-tools"
+          zstd -dc "$RUNNER_TEMP/bpf-linker.tar.zst" | tar -xf - -C "$RUNNER_TEMP/bpf-tools"
+          echo "$RUNNER_TEMP/bpf-tools" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bpf-tools/bpf-linker" --version
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          workspaces: |
+            .build/core -> target
+            .build/core/crates/honk-ebpf -> target
+          key: honksu-android-arm64-api35-ebpf
+          cache-on-failure: true
+      - name: Build BTF-bearing eBPF object before Android settings
+        working-directory: .build/core/crates/honk-ebpf
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+            CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.build/core/crates/honk-ebpf/target" \
+            cargo "+$HONKSU_EBPF_TOOLCHAIN" build --locked --release -Zbuild-std=core --target bpfel-unknown-none
+          object=target/bpfel-unknown-none/release/honk-ebpf
+          readelf -SW "$object" > "$RUNNER_TEMP/honksu-ebpf-sections.txt"
+          grep -q '\.BTF ' "$RUNNER_TEMP/honksu-ebpf-sections.txt"
+          printf '%s' "$HONKSU_EBPF_TOOLCHAIN" > "$object.toolchain"
       - name: Configure Android toolchain
         shell: bash
         run: |
@@ -67,19 +108,11 @@ jobs:
           echo "CMAKE_TOOLCHAIN_FILE_aarch64_linux_android=$GITHUB_WORKSPACE/.build/core/ci/android-toolchain.cmake" >> "$GITHUB_ENV"
           echo "BORING_BSSL_RUST_CPPLIB=c++_static" >> "$GITHUB_ENV"
           echo "RUSTFLAGS=-C link-arg=-lc++abi -C link-arg=-Wl,-z,max-page-size=16384" >> "$GITHUB_ENV"
-      - name: Install pinned Rust toolchain and Android target
-        working-directory: .build/core
-        run: rustup target add "$TARGET"
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
-        with:
-          workspaces: .build/core -> target
-          key: honksu-android-arm64-api35
-          cache-on-failure: true
       - name: Build native honk core
         working-directory: .build/core
-        run: cargo build --locked --release --target "$TARGET" -p honk-core --no-default-features --features clash-api,rprx
+        run: cargo build --locked --release --target "$TARGET" -p honk-core --no-default-features --features "${{ steps.core.outputs.features }}"
       - name: Package KernelSU module
-        run: python3 tools/package.py --core .build/core/target/aarch64-linux-android/release/honk-core --out dist
+        run: python3 tools/package.py --core .build/core/target/aarch64-linux-android/release/honk-core --ebpf-object .build/core/crates/honk-ebpf/target/bpfel-unknown-none/release/honk-ebpf --out dist
       - name: Verify deliverable checksums
         working-directory: dist
         run: sha256sum -c SHA256SUMS
