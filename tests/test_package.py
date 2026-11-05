@@ -27,7 +27,7 @@ class PackageTests(unittest.TestCase):
         self.core = self.directory / "honk-core"
         self.object = self.directory / "honk-ebpf.o"
         self.object.write_bytes(elf(247) + b".BTF\x00kernel-object-fixture")
-        self.core.write_bytes(elf(183) + b"/system/bin/linker64\x00" + self.object.read_bytes())
+        self.core.write_bytes(elf(183) + b"/system/bin/linker64\x00socket-identity\x00" + self.object.read_bytes())
         self.out = self.directory / "dist"
 
     def tearDown(self):
@@ -61,12 +61,18 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(props["core_repository"], metadata["repository"])
             self.assertEqual(props["core_ebpf_compiled"], "1")
             self.assertEqual(props["core_android_interception"], "0")
+            self.assertEqual(props["core_socket_identity_probe"], "1")
             self.assertEqual(props["core_sha256"], hashlib.sha256(archive.read("bin/honk-core")).hexdigest())
             self.assertIn("hotinstall.sh", archive.namelist())
             self.assertIn(metadata["commit"], archive.read("CORE_SOURCE.md").decode())
         for line in (self.out / "SHA256SUMS").read_text().splitlines():
             digest, name = line.split("  ")
             self.assertEqual(hashlib.sha256((self.out / name).read_bytes()).hexdigest(), digest)
+
+    def test_old_core_cannot_be_labeled_as_supporting_identity_probe(self):
+        self.core.write_bytes(elf(183) + b"/system/bin/linker64\x00" + self.object.read_bytes())
+        with self.assertRaisesRegex(ValueError, "socket-identity"):
+            PACKAGE.build(self.core, self.out, self.object)
 
 
 if __name__ == "__main__":

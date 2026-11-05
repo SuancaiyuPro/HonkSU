@@ -13,6 +13,18 @@ int main(int argc, char **argv) {
         puts("honk-core test fixture");
         return 0;
     }
+    if (argc > 1 && strcmp(argv[1], "android-ebpf-probe") == 0) {
+        if (argc > 2 && strcmp(argv[2], "--help") == 0) {
+            puts("fixture --socket-identity");
+            return 0;
+        }
+        const char *mode = getenv("HONKSU_TEST_PROBE");
+        if (mode && strcmp(mode, "slow") == 0) sleep(5);
+        if (mode && strcmp(mode, "fail") == 0) { puts("private-socket-identity: FAIL fixture"); return 7; }
+        if (!mode || strcmp(mode, "incomplete") != 0) puts("private-socket-identity: OK (fixture)");
+        puts("probe: OK (fixture)");
+        return 0;
+    }
     /* The managed test executor exposes host procfs with translated PIDs. */
     const char *mirror = getenv("HONKSU_TEST_PROC_ROOT");
     if (mirror) {

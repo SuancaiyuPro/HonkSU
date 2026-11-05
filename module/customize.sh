@@ -5,7 +5,7 @@
 [ "$API" -ge 35 ] || abort "Android API 35 or newer is required."
 [ -s "$MODPATH/bin/honk-core" ] || abort "Missing honk-core; install the built module ZIP."
 (cd "$MODPATH/bin" && sha256sum -c SHA256SUMS) || abort "Core checksum verification failed."
-ui_print "HonkSU 0.1.0-alpha.2"
+ui_print "HonkSU 0.1.0-alpha.3"
 ui_print "eBPF backend compiled; Android interception is not ready. Starting remains mock-only."
 export MODULE_HOT_INSTALL_REQUEST=true
 export MODULE_HOT_RUN_SCRIPT=hotinstall.sh

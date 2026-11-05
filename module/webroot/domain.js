@@ -38,5 +38,18 @@
     return [mode, String(Number(port)), String(Number(apiPort)), match.slice(1, 5).map(Number).join('.') + ':' + Number(match[5]), autostart ? '1' : '0'];
   }
   function quote(value) { return "'" + String(value).replace(/'/g, "'\\''") + "'"; }
-  return Object.freeze({ canonicalUrl, displayOrigin, parseStatus, settings, quote });
+  function probeResult(state) {
+    if (state.probe_available !== '1') return { label: '核心不支持此验证', detail: '请更新到包含 socket 身份验证的模块版本。' };
+    const results = {
+      not_run: ['尚未验证', '检查内核加载、透明监听和自身流量旁路能力，仅在隔离网络中发送测试报文。'],
+      running: ['验证中', '正在检查本机能力，完成后将显示详细结果。'],
+      passed: ['隔离验证通过', '此结果证明私有网络中的旁路能力，完整透明接管仍待适配。'],
+      failed: ['验证失败', '查看结果了解失败阶段；失败不会自动开启流量接管。'],
+      stale: ['需要重新验证', '核心或本次开机环境已变化，旧结果不再代表当前设备状态。'],
+      interrupted: ['上次验证已中断', '请重新运行验证，查看结果中的已有输出。']
+    };
+    const result = results[state.probe_state] || results.not_run;
+    return { label: result[0], detail: result[1] };
+  }
+  return Object.freeze({ canonicalUrl, displayOrigin, parseStatus, settings, quote, probeResult });
 });

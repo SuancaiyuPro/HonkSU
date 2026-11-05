@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 
 (async () => {
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  const browser = await chromium.launch({ headless: true, channel: process.env.HONKSU_TEST_BROWSER_CHANNEL || undefined, args: ['--no-sandbox'] });
   const page = await browser.newPage({ viewport: { width: 393, height: 852 }, deviceScaleFactor: 1 });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -14,11 +14,13 @@ const { pathToFileURL } = require('node:url');
   assert(await page.locator('#environment').isVisible());
   assert(await page.locator('#start').isDisabled());
   await page.addInitScript(() => {
-    const state = { running: '0', pid: '0', mode: 'test', port: '12346', api_port: '9091', bootstrap: '223.5.5.5:53', autostart: '0', providers: '0', core_present: '1', pending_restart: '0' };
+    const state = { running: '0', pid: '0', mode: 'test', port: '12346', api_port: '9091', bootstrap: '223.5.5.5:53', autostart: '0', providers: '0', core_present: '1', pending_restart: '0', probe_available: '1', probe_state: 'not_run', core_ebpf_compiled: '1', core_commit: 'c4956ef630bd8df3694960b1360720807c215957' };
+    window.honksuFixtureState = state;
     const subscriptions = [];
     window.ksu = { exec(command, options, callback) {
       const args = Array.from(command.matchAll(/'([^']*)'/g), match => match[1]);
       let output = '';
+      let errno = 0;
       switch (args[1]) {
         case 'status': output = Object.entries(state).map(([key, value]) => `${key}=${value}`).join('\n'); break;
         case 'providers': output = subscriptions.map((row, index) => `p${index + 1}\t${row[0]}\t${row[1]}`).join('\n'); break;
@@ -29,9 +31,11 @@ const { pathToFileURL } = require('node:url');
         case 'settings': [state.mode, state.port, state.api_port, state.bootstrap, state.autostart] = args.slice(2); break;
         case 'logs': output = 'fixture log: core test process; interception disabled'; break;
         case 'clear-log': break;
+        case 'probe': state.probe_state = window.honksuFixtureFailProbe ? 'failed' : 'passed'; errno = window.honksuFixtureFailProbe ? 1 : 0; break;
+        case 'probe-log': output = state.probe_state === 'failed' ? 'private-socket-identity: FAIL fixture' : 'private-socket-identity: OK (fixture)'; break;
         case 'remove': subscriptions.splice(Number(args[2].slice(1)) - 1, 1); state.providers = String(subscriptions.length); break;
       }
-      setTimeout(() => window[callback](0, output, ''), 5);
+      setTimeout(() => window[callback](errno, output, errno ? 'fixture probe failure' : ''), 5);
     } };
   });
   await page.reload();
@@ -54,10 +58,20 @@ const { pathToFileURL } = require('node:url');
   await page.locator('#start').click();
   await page.waitForFunction(() => document.getElementById('status-label').textContent.includes('运行中'));
   assert.match(await page.locator('#hero-detail').textContent(), /未接管/);
+  await page.locator('#run-probe').click();
+  await page.waitForFunction(() => document.getElementById('probe-state').textContent === '隔离验证通过');
+  await page.waitForFunction(() => document.getElementById('probe-output').textContent.includes('private-socket-identity: OK'));
   const output = path.resolve(__dirname, '../../honksu-build');
   fs.mkdirSync(output, { recursive: true });
   await page.screenshot({ path: path.join(output, 'manager-overview.png'), fullPage: true });
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await page.evaluate(() => { window.honksuFixtureFailProbe = true; });
+  await page.locator('#run-probe').click();
+  await page.waitForFunction(() => document.getElementById('probe-state').textContent === '验证失败');
+  await page.waitForFunction(() => document.getElementById('probe-output').textContent.includes('FAIL fixture'));
+  await page.evaluate(() => { window.honksuFixtureState.probe_state = 'stale'; });
+  await page.locator('#refresh').click();
+  await page.waitForFunction(() => document.getElementById('probe-state').textContent === '需要重新验证');
   await page.locator('[data-page="subscriptions"]').click();
   await page.screenshot({ path: path.join(output, 'manager-subscriptions.png'), fullPage: true });
   await page.locator('[data-page="logs"]').click();

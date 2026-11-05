@@ -27,6 +27,13 @@
         <button id="restart" class="text-button" disabled>重启核心并应用配置</button>
         <div class="notice amber"><strong>透明接管尚未启用</strong><p>当前为 honk 原生核心测试版。运行进程不会接管手机流量，eBPF 入站还需继续移植。</p></div>
         <div id="dirty" class="notice" hidden>配置已修改，重启核心后生效。</div>
+        <section class="diagnostic-card" aria-labelledby="probe-title">
+          <div class="diagnostic-heading"><h3 id="probe-title">eBPF 能力验证</h3><span id="probe-state" class="chip" aria-live="polite">正在读取</span></div>
+          <p id="probe-detail" class="description">读取本机验证记录</p>
+          <div class="controls"><button id="run-probe" class="secondary" disabled>运行隔离验证</button><button id="view-probe" class="secondary" disabled>查看结果</button></div>
+          <p id="probe-time" class="hint">验证不会在开机时自动执行</p>
+          <pre id="probe-output" tabindex="0" hidden></pre>
+        </section>
         <dl class="facts">
           <div><dt>订阅</dt><dd id="provider-count">—</dd></div>
           <div><dt>进程 PID</dt><dd id="core-pid">—</dd></div>
@@ -35,7 +42,7 @@
           <div><dt>已安装核心能力</dt><dd id="core-build">正在读取</dd></div>
           <div><dt>已安装核心版本</dt><dd id="core-revision">—</dd></div>
           <div><dt>热安装</dt><dd id="hot-install-status">—</dd></div>
-          <div><dt>模块版本</dt><dd>0.1.0-alpha.2</dd></div>
+          <div><dt>模块版本</dt><dd>0.1.0-alpha.3</dd></div>
         </dl>
         <div id="old-core" class="notice amber" hidden>旧核心仍在运行。热安装恢复可能未完成，请检查安装日志后重启核心。</div>
       </section>

@@ -1,9 +1,10 @@
 {
   "repository": "SuancaiyuPro/honk-for-Android",
-  "commit": "84c41144e8aa0db1a93094e0a8568e3cc6fdbdf2",
+  "commit": "c4956ef630bd8df3694960b1360720807c215957",
   "target": "aarch64-linux-android",
   "api": 35,
   "features": ["clash-api", "rprx", "ebpf"],
   "ebpf": true,
-  "android_interception": false
+  "android_interception": false,
+  "socket_identity_probe": true
 }

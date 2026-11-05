@@ -20,7 +20,7 @@ def write_zip(source, target):
 
 
 def build(core, output, ebpf_object=None):
-    metadata = json.loads((ROOT / "core.lock.json").read_text())
+    metadata = json.loads((ROOT / "core.lock.json").read_text(encoding="utf-8"))
     binary = core.read_bytes()
     if len(binary) < 64 or binary[:6] != b"\x7fELF\x02\x01" or struct.unpack_from("<H", binary, 18)[0] != 183:
         raise ValueError("The supplied core must be an ARM64 little-endian ELF executable")
@@ -37,7 +37,9 @@ def build(core, output, ebpf_object=None):
             raise ValueError("The supplied core does not embed the matching eBPF object")
         object_digest = hashlib.sha256(kernel_object).hexdigest()
     digest = hashlib.sha256(binary).hexdigest()
-    properties = dict(line.split("=", 1) for line in (ROOT / "module/module.prop").read_text().splitlines() if "=" in line)
+    if metadata.get("socket_identity_probe") and b"socket-identity" not in binary:
+        raise ValueError("The supplied core does not include the socket-identity probe")
+    properties = dict(line.split("=", 1) for line in (ROOT / "module/module.prop").read_text(encoding="utf-8").splitlines() if "=" in line)
     version = properties["version"]
     output.mkdir(parents=True, exist_ok=True)
     destination = output / f"HonkSU_{version}_arm64.zip"
@@ -47,13 +49,14 @@ def build(core, output, ebpf_object=None):
         (stage / "bin").mkdir(exist_ok=True)
         shutil.copy2(core, stage / "bin/honk-core")
         (stage / "bin/honk-core").chmod(0o755)
-        (stage / "bin/SHA256SUMS").write_text(f"{digest}  honk-core\n")
+        (stage / "bin/SHA256SUMS").write_text(f"{digest}  honk-core\n", encoding="utf-8", newline="\n")
         (stage / "core.prop").write_text(
             f"core_repository={metadata['repository']}\ncore_commit={metadata['commit']}\n"
             f"core_target={metadata['target']}\ncore_api={metadata['api']}\ncore_sha256={digest}\n"
             f"core_features={','.join(metadata['features'])}\ncore_ebpf_compiled={int(metadata['ebpf'])}\n"
             f"core_android_interception={int(metadata['android_interception'])}\ncore_ebpf_sha256={object_digest}\n"
-            f"module_version={version}\n"
+            f"core_socket_identity_probe={int(metadata.get('socket_identity_probe', False))}\n"
+            f"module_version={version}\n", encoding="utf-8", newline="\n"
         )
         shutil.copy2(ROOT / "LICENSE", stage / "LICENSE")
         shutil.copy2(ROOT / "CORE_SOURCE.md", stage / "CORE_SOURCE.md")
@@ -68,7 +71,7 @@ def build(core, output, ebpf_object=None):
                 continue
             archive.write(path, Path("HonkSU", relative).as_posix())
     hashes = [f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}" for path in (destination, source_zip)]
-    (output / "SHA256SUMS").write_text("\n".join(hashes) + "\n")
+    (output / "SHA256SUMS").write_text("\n".join(hashes) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps({"module": str(destination.resolve()), "source": str(source_zip.resolve()), "core_sha256": digest}))
 
 

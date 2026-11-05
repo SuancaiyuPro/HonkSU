@@ -10,7 +10,7 @@
       const timer = setTimeout(() => {
         delete window[callback];
         reject(new Error('操作超时，请刷新状态确认结果'));
-      }, 30000);
+      }, action === 'probe' ? 65000 : 30000);
       window[callback] = (errno, stdout, stderr) => {
         clearTimeout(timer);
         delete window[callback];
