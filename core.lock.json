@@ -1,0 +1,8 @@
+{
+  "repository": "SuancaiyuPro/honk",
+  "commit": "9e4fbe878a92183fb0be93380725daa4e9e98f32",
+  "target": "aarch64-linux-android",
+  "api": 35,
+  "features": ["clash-api", "rprx"],
+  "ebpf": false
+}

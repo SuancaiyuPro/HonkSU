@@ -1,0 +1,6 @@
+dist/
+.build/
+__pycache__/
+*.pyc
+module/bin/honk-core
+node_modules/

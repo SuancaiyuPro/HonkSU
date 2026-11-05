@@ -1,0 +1,74 @@
+const { chromium } = require('playwright');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const fs = require('node:fs');
+const { pathToFileURL } = require('node:url');
+
+(async () => {
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  const page = await browser.newPage({ viewport: { width: 393, height: 852 }, deviceScaleFactor: 1 });
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const url = pathToFileURL(path.resolve(__dirname, '../module/webroot/index.html')).href;
+  await page.goto(url);
+  assert(await page.locator('#environment').isVisible());
+  assert(await page.locator('#start').isDisabled());
+  await page.addInitScript(() => {
+    const state = { running: '0', pid: '0', mode: 'test', port: '12346', api_port: '9091', bootstrap: '223.5.5.5:53', autostart: '0', providers: '0', core_present: '1', pending_restart: '0' };
+    const subscriptions = [];
+    window.ksu = { exec(command, options, callback) {
+      const args = Array.from(command.matchAll(/'([^']*)'/g), match => match[1]);
+      let output = '';
+      switch (args[1]) {
+        case 'status': output = Object.entries(state).map(([key, value]) => `${key}=${value}`).join('\n'); break;
+        case 'providers': output = subscriptions.map((row, index) => `p${index + 1}\t${row[0]}\t${row[1]}`).join('\n'); break;
+        case 'add': subscriptions.push(args.slice(2)); state.providers = String(subscriptions.length); break;
+        case 'start': state.running = '1'; state.pid = '1234'; break;
+        case 'stop': state.running = '0'; state.pid = '0'; break;
+        case 'restart': state.running = '1'; state.pid = '1235'; state.pending_restart = '0'; break;
+        case 'settings': [state.mode, state.port, state.api_port, state.bootstrap, state.autostart] = args.slice(2); break;
+        case 'logs': output = 'fixture log: core test process; interception disabled'; break;
+        case 'clear-log': break;
+        case 'remove': subscriptions.splice(Number(args[2].slice(1)) - 1, 1); state.providers = String(subscriptions.length); break;
+      }
+      setTimeout(() => window[callback](0, output, ''), 5);
+    } };
+  });
+  await page.reload();
+  await page.waitForFunction(() => !document.getElementById('start').disabled);
+  await page.locator('[data-page="subscriptions"]').click();
+  await page.locator('#subscription-name').fill('<img src=x onerror=alert(1)>');
+  await page.locator('#subscription-url').fill('https://example.com/sub?token=private');
+  await page.locator('#add-subscription').click();
+  await page.waitForFunction(() => document.querySelector('.provider h3'));
+  assert.equal(await page.locator('.provider h3').textContent(), '<img src=x onerror=alert(1)>');
+  assert.equal(await page.locator('.provider img').count(), 0);
+  assert.equal(await page.locator('.provider p').textContent(), 'https://example.com');
+  await page.locator('[data-page="inbound"]').click();
+  assert(await page.locator('input[value="ebpf"]').isDisabled());
+  await page.locator('#port').fill('12347');
+  await page.locator('#save-settings').click();
+  await page.waitForFunction(() => !document.getElementById('save-settings').disabled);
+  await page.locator('[data-page="overview"]').click();
+  assert.match(await page.locator('#inbound-summary').textContent(), /12347/);
+  await page.locator('#start').click();
+  await page.waitForFunction(() => document.getElementById('status-label').textContent.includes('运行中'));
+  assert.match(await page.locator('#hero-detail').textContent(), /未接管/);
+  const output = path.resolve(__dirname, '../../honksu-build');
+  fs.mkdirSync(output, { recursive: true });
+  await page.screenshot({ path: path.join(output, 'manager-overview.png'), fullPage: true });
+  assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await page.locator('[data-page="subscriptions"]').click();
+  await page.screenshot({ path: path.join(output, 'manager-subscriptions.png'), fullPage: true });
+  await page.locator('[data-page="logs"]').click();
+  await page.waitForFunction(() => document.getElementById('log-output').textContent.includes('fixture log'));
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.locator('[data-page="inbound"]').click();
+  await page.screenshot({ path: path.join(output, 'manager-inbound-dark.png'), fullPage: true });
+  await page.locator('[data-page="overview"]').click();
+  await page.locator('#stop').click();
+  await page.waitForFunction(() => document.getElementById('status-label').textContent.includes('已停止'));
+  assert.deepEqual(errors, []);
+  console.log('WebUI preview, bridge flow, subscription import, safe rendering, settings, lifecycle, logs and mobile layout checks passed');
+  await browser.close();
+})().catch(error => { console.error(error); process.exitCode = 1; });

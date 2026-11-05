@@ -1,0 +1,8 @@
+#!/system/bin/sh
+MODDIR=$(CDPATH= cd "${0%/*}/.." && pwd)
+BB=/data/adb/ksu/bin/busybox
+if [ -x "$BB" ]; then
+  export ASH_STANDALONE=1
+  exec "$BB" ash "$MODDIR/scripts/control.sh" "$@"
+fi
+exec sh "$MODDIR/scripts/control.sh" "$@"

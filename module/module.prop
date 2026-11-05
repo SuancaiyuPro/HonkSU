@@ -1,0 +1,6 @@
+id=honksu
+name=HonkSU
+version=0.1.0-alpha.1
+versionCode=1
+author=SuancaiyuPro
+description=honk Android 核心管理器：订阅、核心测试启停、入站设置与日志。eBPF 透明接管待适配。

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>HonkSU</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="domain.js"></script>
+  <script defer src="bridge.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div><p class="eyebrow">Honk for Android</p><h1>HonkSU<span class="alpha">ALPHA</span></h1></div>
+      <button id="refresh" class="icon-button" aria-label="刷新状态">↻</button>
+    </header>
+    <div id="environment" class="notice" hidden>请在 KernelSU 中打开此模块的 WebUI。浏览器预览无法执行 Root 操作。</div>
+    <main>
+      <section class="page" id="overview" aria-labelledby="overview-title">
+        <h2 id="overview-title" class="sr-only">概览</h2>
+        <div class="status-line"><span id="status-dot" class="status-dot"></span><span id="status-label">正在读取状态</span><span id="mode-chip" class="chip">核心测试</span></div>
+        <div class="hero"><p class="eyebrow">CORE PROCESS</p><h2 id="hero-title">连接管理器</h2><p id="hero-detail">读取本机核心状态与配置</p></div>
+        <div class="controls"><button id="start" class="primary" disabled>启动测试核心</button><button id="stop" class="secondary" disabled>停止</button></div>
+        <button id="restart" class="text-button" disabled>重启核心并应用配置</button>
+        <div class="notice amber"><strong>透明接管尚未启用</strong><p>当前为 honk 原生核心测试版。运行进程不会接管手机流量，eBPF 入站还需继续移植。</p></div>
+        <div id="dirty" class="notice" hidden>配置已修改，重启核心后生效。</div>
+        <dl class="facts">
+          <div><dt>订阅</dt><dd id="provider-count">—</dd></div>
+          <div><dt>进程 PID</dt><dd id="core-pid">—</dd></div>
+          <div><dt>TCP / UDP 测试监听</dt><dd id="inbound-summary">—</dd></div>
+          <div><dt>Clash API</dt><dd id="api-summary">—</dd></div>
+          <div><dt>核心能力</dt><dd>Clash API · VLESS / VMess</dd></div>
+          <div><dt>版本</dt><dd>0.1.0-alpha.1</dd></div>
+        </dl>
+      </section>
+      <section class="page" id="subscriptions" aria-labelledby="subscriptions-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">PROVIDERS</p><h2 id="subscriptions-title">订阅</h2></div><span id="subscription-total" class="chip">0 / 32</span></div>
+        <p class="description">保存 HTTP / HTTPS 订阅链接。核心启动后下载并解析节点；支持的格式由 honk 决定。</p>
+        <form id="subscription-form" class="form" autocomplete="off">
+          <label>名称<input id="subscription-name" placeholder="例如：主订阅" maxlength="60" required></label>
+          <label>订阅链接<input id="subscription-url" type="url" placeholder="https://example.com/subscribe" required spellcheck="false" autocapitalize="off" autocomplete="off"></label>
+          <button id="add-subscription" class="primary" type="submit" disabled>导入订阅</button>
+        </form>
+        <p class="hint">保存不代表已下载或验证成功。启动后可在日志中查看加载结果。</p>
+        <div id="subscription-list" class="provider-list"></div>
+      </section>
+      <section class="page" id="inbound" aria-labelledby="inbound-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">INBOUND</p><h2 id="inbound-title">入站</h2></div></div>
+        <form id="settings-form" class="form">
+          <fieldset><legend>运行方式</legend><label class="choice"><input type="radio" name="mode" value="test" checked><span><strong>核心测试</strong><small>启动真实 honk 进程，不接管手机流量</small></span></label><label class="choice disabled"><input type="radio" name="mode" value="ebpf" disabled><span><strong>eBPF 透明入站</strong><small>待核心 Android eBPF 后端适配</small></span><span class="chip">待适配</span></label></fieldset>
+          <label>TCP / UDP 测试监听端口<input id="port" type="number" min="1024" max="65535" value="12346" required></label>
+          <label>Clash API 端口<input id="api-port" type="number" min="1024" max="65535" value="9091" required><small>固定绑定 127.0.0.1，认证令牌由模块自动生成</small></label>
+          <label>节点解析 DNS<input id="bootstrap" value="223.5.5.5:53" placeholder="223.5.5.5:53" required><small>首版支持 IPv4 地址和端口</small></label>
+          <label class="switch-row"><span><strong>开机启动测试核心</strong><small>默认关闭，仍不启用流量接管</small></span><input id="autostart" type="checkbox"></label>
+          <button id="save-settings" class="primary" type="submit" disabled>保存入站设置</button>
+        </form>
+        <p class="hint">测试监听端口不是 SOCKS5 / HTTP 代理端口。当前模块不会添加 iptables、路由或 eBPF 接管规则。</p>
+      </section>
+      <section class="page" id="logs" aria-labelledby="logs-title" hidden>
+        <div class="section-heading"><div><p class="eyebrow">DIAGNOSTICS</p><h2 id="logs-title">日志</h2></div><div class="log-actions"><button id="refresh-log" class="secondary small" disabled>刷新</button><button id="clear-log" class="secondary small" disabled>清空</button></div></div>
+        <p class="description">最近 180 行核心日志。订阅 URL 会隐藏；分享前仍请检查节点信息。</p>
+        <pre id="log-output" tabindex="0">尚无日志</pre>
+      </section>
+    </main>
+    <nav class="bottom-nav" aria-label="主导航"><button class="active" data-page="overview" aria-current="page"><span>◉</span>概览</button><button data-page="subscriptions"><span>☷</span>订阅</button><button data-page="inbound"><span>⇄</span>入站</button><button data-page="logs"><span>▤</span>日志</button></nav>
+    <div id="toast" role="status" aria-live="polite" hidden></div>
+  </div>
+</body>
+</html>
